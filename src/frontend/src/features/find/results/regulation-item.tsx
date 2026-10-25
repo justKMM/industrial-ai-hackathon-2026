@@ -37,23 +37,25 @@ export function RegulationItem({ regulation, visible, filtering, checked, onTogg
           indeterminate={done > 0 && done < ids.length}
           onCheckedChange={(value) => onSetMany(ids, value)}
         />
-        <AccordionTrigger className="pr-0 pb-3 hover:no-underline">
-          <span className="flex min-w-0 flex-col gap-1.5">
-            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <Badge>{regulation.code}</Badge>
-              <span className="text-base font-medium">{regulation.title}</span>
-              <span className="text-xs font-normal text-muted-foreground">version {regulation.version}</span>
+        <div className="min-w-0 flex-1">
+          <AccordionTrigger className="pr-0 pb-3 hover:no-underline">
+            <span className="flex min-w-0 flex-col gap-1.5">
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <Badge>{regulation.code}</Badge>
+                <span className="text-base font-medium">{regulation.title}</span>
+                <span className="text-xs font-normal text-muted-foreground">version {regulation.version}</span>
+              </span>
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-normal text-muted-foreground">
+                <Badge variant="outline" title={level.hint}>
+                  {level.label} level
+                </Badge>
+                {regulation.confidence !== 'high' && <span className="capitalize">{regulation.confidence} confidence</span>}
+                <span className="tabular-nums">{filtering ? `${visible.length} of ${total}` : total} requirements</span>
+                <span className="tabular-nums">{done} checked</span>
+              </span>
             </span>
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-normal text-muted-foreground">
-              <Badge variant="outline" title={level.hint}>
-                {level.label} level
-              </Badge>
-              {regulation.confidence !== 'high' && <span className="capitalize">{regulation.confidence} confidence</span>}
-              <span className="tabular-nums">{filtering ? `${visible.length} of ${total}` : total} requirements</span>
-              <span className="tabular-nums">{done} checked</span>
-            </span>
-          </span>
-        </AccordionTrigger>
+          </AccordionTrigger>
+        </div>
       </div>
       <AccordionContent>
         <div className="flex flex-col gap-2 px-4 pb-3">

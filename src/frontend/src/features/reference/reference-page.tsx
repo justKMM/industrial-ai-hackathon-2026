@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import { SearchX, X } from 'lucide-react'
+import { FilterSelect } from '@/components/filter-select'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { listCases } from '@/lib/cases'
-import { FilterSelect } from './filter-select'
 import { applyFilters, emptyFilters, isFiltering, unique, type Filters } from './filters'
 import { RequirementsTable } from './requirements-table'
 import { useRequirements } from './use-requirements'
@@ -13,7 +13,7 @@ import { useRequirements } from './use-requirements'
 const cases = listCases()
 const toOptions = (values: string[]) => values.map((v) => ({ value: v, label: v }))
 
-export function RequirementsPage() {
+export function ReferencePage() {
   const [caseId, setCaseId] = useState(cases[0]?.id)
   const [filters, setFilters] = useState<Filters>(emptyFilters)
   const data = useRequirements(caseId)
@@ -35,11 +35,11 @@ export function RequirementsPage() {
   const set = (patch: Partial<Filters>) => setFilters((f) => ({ ...f, ...patch }))
 
   return (
-    <main className="mx-auto flex max-w-7xl flex-col gap-6 px-6 pt-24 pb-6">
+    <main className="mx-auto flex max-w-7xl flex-col gap-6 px-6 pt-28 pb-16">
       <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Regulatory requirements</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Reference cases</h1>
         <p className="text-sm text-muted-foreground">
-          Requirements that apply to a product, with the regulation, version, paragraph and page they come from.
+          Expert-curated requirements for the sample products in the repository, each with the regulation, version, paragraph and page it comes from. Use them to judge what a search returns.
         </p>
       </header>
 

@@ -1,8 +1,9 @@
 import {
   BookMarked,
-  GitCompareArrows,
-  HardDrive,
+  ClipboardCheck,
+  History,
   ListChecks,
+  MousePointerClick,
   Shapes,
   type LucideIcon,
 } from 'lucide-react'
@@ -19,7 +20,7 @@ const features: Feature[] = [
   {
     icon: BookMarked,
     title: 'Grounded citations',
-    body: 'Every requirement cites its regulation, version, page and paragraph, so each finding can be traced to the source text.',
+    body: 'Every requirement cites its regulation, version, page and paragraph, so it can be traced to the source text.',
   },
   {
     icon: ListChecks,
@@ -29,17 +30,22 @@ const features: Feature[] = [
   {
     icon: Shapes,
     title: 'Applicability by product',
-    body: 'Requirements are matched to the product type, and to colour or class where a paragraph depends on it.',
+    body: 'Regulations and paragraphs are matched to the product type, its materials and the electronics it contains.',
   },
   {
-    icon: GitCompareArrows,
-    title: 'Version change tracking',
-    body: 'Requirements carry the regulation version they come from, so changes between versions can be followed.',
+    icon: History,
+    title: 'Current regulations first',
+    body: 'When a regulation has been replaced by a newer one, regal.ai points you to the one that is in force.',
   },
   {
-    icon: HardDrive,
-    title: 'Stateless and local',
-    body: 'Submitted documents are analysed and returned as results. Nothing is stored by the app.',
+    icon: MousePointerClick,
+    title: 'Components on your drawing',
+    body: 'Select a part of your exploded view to see which requirements are about it.',
+  },
+  {
+    icon: ClipboardCheck,
+    title: 'A checklist you keep',
+    body: 'Tick off requirements as you verify them, track your progress and export the list as a CSV file.',
   },
 ]
 
@@ -50,8 +56,8 @@ export function FeaturesSection() {
         <SectionHeading
           id="features"
           eyebrow="Built for traceability"
-          title="Every finding points back to the regulation"
-          description="regal.ai keeps the link between your documentation and the exact requirement it was checked against."
+          title="Every requirement points back to the regulation"
+          description="regal.ai keeps the link between your product and the exact paragraph each requirement comes from."
         />
 
         <ul className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

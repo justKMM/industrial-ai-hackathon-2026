@@ -11,18 +11,18 @@ interface Step {
 const steps: Step[] = [
   {
     icon: Upload,
-    title: 'Upload documentation',
-    body: 'Drop in the technical files for a component. Several documents can be submitted together.',
+    title: 'Upload your documents',
+    body: 'Drop in the specification of a component and, if you have one, its exploded view or drawing.',
   },
   {
     icon: Scale,
-    title: 'Analyse against regulations',
-    body: 'The documentation is checked against the applicable requirements, one atomic requirement at a time.',
+    title: 'We find the regulations',
+    body: 'The product is matched to the regulations that apply, and their paragraphs are written out as single requirements.',
   },
   {
     icon: ClipboardCheck,
-    title: 'Review unmet requirements',
-    body: 'See what is missing, why it was flagged, and the regulation paragraph it comes from.',
+    title: 'Work through the checklist',
+    body: 'Tick off each requirement as you verify it. Every one names its regulation, version, page and paragraph.',
   },
 ]
 
@@ -33,7 +33,7 @@ export function HowItWorks() {
         <SectionHeading
           id="how-it-works"
           eyebrow="How it works"
-          title="From documents to findings in three steps"
+          title="From documents to a checklist in three steps"
         />
 
         <div className="relative mt-14">

@@ -26,6 +26,9 @@ const STEPS: { id: StageId; ms: number; needsDrawing?: boolean; detail?: string 
   { id: 'components', ms: 1500, needsDrawing: true, detail: '10 components' },
 ]
 
+// crypto.randomUUID only exists in secure contexts (localhost, https); the dev server may be opened by IP address.
+const newId = () => globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36)
+
 function readJobs(): Job[] {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as Job[]
@@ -60,7 +63,7 @@ export const mockApi: AnalysisApi = {
   async start(files) {
     await new Promise((resolve) => setTimeout(resolve, 400))
     const job: Job = {
-      id: crypto.randomUUID(),
+      id: newId(),
       createdAt: Date.now(),
       withDrawing: files.some(isImage),
       failing: files.some((f) => /fail/i.test(f.name)),
