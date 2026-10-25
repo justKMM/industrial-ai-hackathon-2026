@@ -15,19 +15,19 @@ export function CtaBand({ onNavigate }: { onNavigate: (route: Route) => void }) 
           />
         </div>
         <h2 id="cta" className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
-          Check your documentation <span className="text-gradient">against the regulations</span>
+          Find the regulations <span className="text-gradient">your product must meet</span>
         </h2>
         <p className="mx-auto mt-4 max-w-xl text-base text-pretty text-muted-foreground">
-          Submit a component's files and see the unmet requirements, or explore the full requirement
-          list first.
+          Submit a component's files and get a checklist of requirements, or look at the reference
+          cases first.
         </p>
         <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Button
             size="lg"
             className="group h-11 w-full px-6 text-base sm:w-auto"
-            onClick={() => onNavigate('assess')}
+            onClick={() => onNavigate('find')}
           >
-            Assess a product
+            Find regulations
             <ArrowRight
               className="transition-transform group-hover:translate-x-0.5"
               data-icon="inline-end"
@@ -38,9 +38,9 @@ export function CtaBand({ onNavigate }: { onNavigate: (route: Route) => void }) 
             size="lg"
             variant="outline"
             className="h-11 w-full bg-background/60 px-6 text-base sm:w-auto"
-            onClick={() => onNavigate('requirements')}
+            onClick={() => onNavigate('reference')}
           >
-            Browse requirements
+            Browse reference cases
           </Button>
         </div>
       </Reveal>

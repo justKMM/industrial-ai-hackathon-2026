@@ -8,8 +8,8 @@ export function ProductShowcase() {
       <SectionHeading
         id="showcase-title"
         eyebrow="The result"
-        title="Unmet requirements, with the reasoning"
-        description="Every finding names the regulation, version, paragraph and page it comes from."
+        title="A checklist of what your product must fulfil"
+        description="Every requirement names the regulation, version, paragraph and page it comes from. Tick them off as you verify them."
       />
       <Reveal delay={100} className="mt-10">
         <ProductVisual />

@@ -1,5 +1,5 @@
-import { Check } from 'lucide-react'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { BookMarked } from 'lucide-react'
+import { HotspotDot } from '@/components/hotspot-dot'
 
 interface Hotspot {
   id: string
@@ -10,7 +10,7 @@ interface Hotspot {
   regulations: { code: string; title: string }[]
 }
 
-// Illustrative content only: example regulations for each part, not an assessment of this car.
+// Illustrative content only: example regulations that can apply to each part.
 const hotspots: Hotspot[] = [
   {
     id: 'windscreen',
@@ -67,38 +67,22 @@ export function CarHotspots() {
   return (
     <ul className="absolute inset-0 m-0 list-none p-0">
       {hotspots.map((spot) => (
-        <li key={spot.id} className="absolute" style={{ left: `${spot.x}%`, top: `${spot.y}%` }}>
-          <Popover>
-            <PopoverTrigger
-              aria-label={`${spot.name}: show example regulations`}
-              className="group relative -translate-x-1/2 -translate-y-1/2 rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            >
-              <span
-                aria-hidden
-                className="absolute inset-0 animate-ping rounded-full bg-white/70 [animation-duration:2.4s]"
-              />
-              <span className="relative block size-4 rounded-full border-2 border-white bg-brand shadow-md transition-transform group-hover:scale-125 group-data-popup-open:scale-125 sm:size-5" />
-            </PopoverTrigger>
-            <PopoverContent side="top" sideOffset={10} className="w-72">
-              <p className="font-medium">{spot.name}</p>
-              <p className="text-xs text-muted-foreground">Example regulations</p>
-              <ul className="mt-2 flex flex-col gap-2">
-                {spot.regulations.map((r) => (
-                  <li key={r.code} className="flex items-start gap-2 text-sm">
-                    <Check className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden />
-                    <span>
-                      <span className="font-medium">{r.code}</span>
-                      <span className="text-muted-foreground"> · {r.title}</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-3 border-t pt-2 text-xs text-muted-foreground">
-                Illustrative example, not an assessment of this vehicle.
-              </p>
-            </PopoverContent>
-          </Popover>
-        </li>
+        <HotspotDot key={spot.id} x={spot.x} y={spot.y} label={`${spot.name}: show example regulations`} tone="photo">
+          <p className="font-medium">{spot.name}</p>
+          <p className="text-xs text-muted-foreground">Regulations that can apply</p>
+          <ul className="mt-2 flex flex-col gap-2">
+            {spot.regulations.map((r) => (
+              <li key={r.code} className="flex items-start gap-2 text-sm">
+                <BookMarked className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden />
+                <span>
+                  <span className="font-medium">{r.code}</span>
+                  <span className="text-muted-foreground"> · {r.title}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 border-t pt-2 text-xs text-muted-foreground">Illustrative examples for this kind of part.</p>
+        </HotspotDot>
       ))}
     </ul>
   )

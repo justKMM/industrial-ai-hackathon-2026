@@ -5,7 +5,7 @@ export function SiteFooter() {
         <span className="font-semibold tracking-tight text-foreground">
           regal<span className="text-brand">.ai</span>
         </span>
-        <p>Regulatory documentation checks for vehicle components.</p>
+        <p>Regulation checklists for vehicle components.</p>
       </div>
     </footer>
   )

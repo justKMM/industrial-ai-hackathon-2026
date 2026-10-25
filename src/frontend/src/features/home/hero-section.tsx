@@ -34,15 +34,15 @@ export function HeroSection({ onNavigate }: { onNavigate: (route: Route) => void
           className="animate-fade-up mt-5 max-w-md text-base text-pretty text-foreground/70 sm:text-lg"
           style={stagger(200)}
         >
-          Check a component's technical documentation against regulations and see the unmet
-          requirements, with citations, before approval does.
+          Upload a component's specification and drawing. regal.ai finds the regulations it has to
+          fulfil and turns them into a checklist of requirements, each cited to its page.
         </p>
         <div
           className="animate-fade-up mt-8 flex flex-wrap items-center gap-3"
           style={stagger(300)}
         >
-          <Button size="lg" className="group h-11 px-6 text-base" onClick={() => onNavigate('assess')}>
-            Assess a product
+          <Button size="lg" className="group h-11 px-6 text-base" onClick={() => onNavigate('find')}>
+            Find regulations
             <ArrowRight
               className="transition-transform group-hover:translate-x-0.5"
               data-icon="inline-end"
@@ -53,9 +53,9 @@ export function HeroSection({ onNavigate }: { onNavigate: (route: Route) => void
             size="lg"
             variant="ghost"
             className="h-11 px-4 text-base"
-            onClick={() => onNavigate('requirements')}
+            onClick={() => onNavigate('reference')}
           >
-            Browse requirements
+            Browse reference cases
           </Button>
         </div>
       </div>

@@ -10,12 +10,12 @@ export function StatsStrip() {
   if (failed || stats?.requirements === 0) return null
 
   return (
-    <section aria-label="Requirement library in numbers" className="px-4 py-10 sm:px-6">
+    <section aria-label="Reference cases in numbers" className="px-4 py-10 sm:px-6">
       <Reveal>
         <dl className="mx-auto grid max-w-4xl grid-cols-1 divide-y divide-border rounded-2xl border bg-card/60 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-          <Stat value={stats?.requirements ?? null} label="Requirements extracted" />
+          <Stat value={stats?.requirements ?? null} label="Reference requirements" />
           <Stat value={stats?.regulations ?? null} label="Regulations covered" />
-          <Stat value={stats?.products ?? null} label="Products available to browse" />
+          <Stat value={stats?.products ?? null} label="Sample products" />
         </dl>
       </Reveal>
     </section>
