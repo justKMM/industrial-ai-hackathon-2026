@@ -1,1 +1,8 @@
 fastapi[standard]
+# the pipeline (src/ai_agent) and the regulation parser (src/regcomp)
+anthropic
+pymupdf
+jsonschema
+pillow
+# tests: python -m pytest src/backend/tests
+pytest

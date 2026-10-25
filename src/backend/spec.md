@@ -1,244 +1,169 @@
 # Backend spec and working notes
 
-Audience: engineers and AI assistants building `src/backend`. This file is the plan and the record of what was checked. The frontend side of the contract is `src/frontend/spec.md` and the types in `src/frontend/src/lib/analysis/types.ts` (the types are the source of truth for the JSON). Last updated 2026-10-25. Nothing in this file has been built yet: `src/backend/main.py` still only answers `GET /`.
+Audience: engineers and AI assistants working on `src/backend`. This file records what the backend does, why, how it was checked, and what is still open. The frontend side of the contract is `src/frontend/spec.md`; the JSON types are in `src/frontend/src/lib/analysis/types.ts` and `src/lib/backend/types.ts`, and their Python twins in `src/backend/models.py`. Last updated 2026-10-25.
 
 ## 1. Purpose
 
-The backend is a thin HTTP layer around the pipeline that already exists in `src/ai_agent/`. It receives a product's documents, runs the pipeline as a background job, reports progress, and returns the result in the shape the frontend needs. It holds **no regulatory logic of its own**: every regulation, page and paragraph in a response comes from the pipeline's files.
+A thin HTTP layer around the pipeline in `src/ai_agent/`. It receives a product's documents, runs the pipeline as a background job, reports progress, and returns the result in the shape the frontend shows. It holds **no regulatory logic of its own**: every regulation, version, page and paragraph in a response is copied from the pipeline's files. It also owns one thing the pipeline does not have: a **persistent regulation index**, so the regulation PDFs are parsed once and not on every run (section 5).
 
-## 2. What exists (read from the code, 2026-10-25)
+## 2. Status
 
-Correction to a common assumption: `src/regcomp/` is the **parser of the regulation PDFs**, not the algorithm that maps documents to regulations. That algorithm is `src/ai_agent/`, which uses `regcomp`.
+| Area | State |
+|---|---|
+| `POST /api/analyses`, `GET /api/analyses/{id}`, `GET /api/analyses/{id}/drawing`, the `example` analysis | built, tested |
+| Jobs: one worker, queue, progress from artifacts, failure messages, restart recovery | built, tested |
+| Persistent regulation index, `GET /api/status`, `POST /api/index/rebuild` | built, tested, run on the real 56 PDFs |
+| Result adapter (run folder to `AnalysisResult`) | built, tested against a real pipeline run (scripted model) and the recorded dev run |
+| API key from `.env`, picked up without a restart | built, tested; one real call confirmed the key works |
+| A full real analysis (real model, real drawing) | **not run** (about $4 and 7 minutes; nobody asked for it yet). Everything around the model has been run with a script in its place |
+| Sub-goal (changes between regulation versions) | not exposed; see section 9 |
+| Page images of the cited regulation pages | not built |
+| Tests | `python -m pytest src/backend/tests` (59 tests, about 20 s, no model call, no cost) |
 
-| Piece | Where | Role |
-|---|---|---|
-| Regulation parser | `src/regcomp/parse.py` (rules), `parse_marker.py` (alternative), `corpus.py` | PDF to nodes: one per numbered paragraph, table or annex heading, each with `label` (`6.10.4.2`, `Annex 4 Part 1 1.2`), physical page range, `path` breadcrumb (`6 Specifications › 6.10 Rear position lamps › 6.10.4.2`), `body`, table grids. No model. Details: `src/README.md` |
-| Pipeline | `src/ai_agent/pipeline.py` (`run_case`), CLI `run.py` | Product spec and/or drawing in, requirements with grounded citations out. Details: `src/ai_agent/README.md` |
-| Format check | `tools/validate.py` | The platform's own check of `submission.json`; the pipeline already calls it (`emit.validate_submission`) |
-| Drift agent | `src/ai_agent/drift.py`, `run_drift.py` | The challenge's sub-goal (changes between regulation versions). No API or UI yet; out of scope here |
-| Benchmarks and tests | `eval/` | Not used at runtime. `eval/test_ai_agent.py` runs the whole chain offline with a scripted model |
-
-The pipeline (`run_case(case_dir, settings, run_dir=None, log=..., llm=None, policy=..., catalog=None, use_image=True, image=None, component_map=None, use_text=True)`):
-
-| Stage | Module | Artifact written in the run folder | What the UI uses it for |
-|---|---|---|---|
-| vision (only with an image) | `vision.py` | `vision.json` (text blocks, components with a normalised `region` box, callouts) | dots on the drawing |
-| profile | `profile.py` | `profile.json`, `profile.md` | product name, summary, vehicle category, part names |
-| regulations | `regulations.py`, `catalog.py` | `regulations.json` (`selected[]` with `level`, `confidence`, `covers`, `reason`; `rejected[]`; `redirects{}`) | the regulation list and why each applies |
-| sections | `sections.py`, `tools.py` | `walk-<reg>.json`, `sections.json`, `citation_hop.json` | nothing directly |
-| obligations | `obligations.py` | `chunks.json`, `candidates.json` (every candidate with its `status`) | nothing directly |
-| emit | `emit.py` | `submission.json` (the requirements), `trace.json` (per requirement: node, quote, `kind`, `applies`, `why`) | the checklist |
-| components (on by default when an image was read) | `components.py` | `component_map.json` (components, their `requirement_ids`, `whole_product_requirement_ids`, callouts) | the component filter |
-| always | `llm.py` | `usage.json`, `calls.jsonl`, `run.json` | cost and time (not shown) |
-
-Rules of the pipeline that the backend must keep intact: the model never writes a location (page and paragraph come from the parsed node); the pipeline never opens `expected.json`; every run leaves its files in `runs/<case>/<run id>/` (git-ignored).
-
-Measured on the dev case (text and image, policy `precision-v2`, from `spec/finding/preset-and-outputs.md`): 317 requirements over UN R10, R148, R150, R48; regulation level precision/recall 1.00/1.00; page level 0.73/0.91. Cost and time at default settings: **about 7.5 minutes and $4**. The LLM layer replays identical requests from `runs/_llm_cache`, so repeating an upload of the same documents is almost free.
-
-## 3. What the product returns
-
-The challenge only expects the relevant regulations and the requirements to fulfil, each cited to regulation, **base** version, page and (optionally) paragraph. It does not expect an assessment of fulfilment, so the API returns no compliance verdict. The frontend shows the result as a checklist. Consequences for the backend:
-
-- The version in every citation is the base version label, and the page is the physical PDF page: both already come from the node, never from a model.
-- A regulation that was selected but has no emitted requirement is **left out** of the response.
-- Requirement ids come from `submission.json` (`R-001` ...). They are stable only within one run; the frontend keys its ticks by analysis id plus requirement id.
-
-## 4. Environment today (checked, not assumed)
-
-- `src/backend/requirements.txt` holds only `fastapi[standard]` (includes `python-multipart`, `uvicorn`). `src/.venv` has FastAPI 0.162, uvicorn and python-multipart and **none of the pipeline's dependencies**: `anthropic`, `pymupdf`, `jsonschema`, `pillow` are missing (`scipy` and `numpy` are only needed by the drift agent). Add them to `requirements.txt`. Python 3.12 or newer (`tools/validate.py`).
-- **No `.env`**: the pipeline needs `AI_AGENT_KEY` (an Anthropic key) in the environment or in the git-ignored `.env` at the repository root; `AI_AGENT_MODEL` defaults to `claude-sonnet-5-5`. The key is never printed or logged by the pipeline; the backend must not either.
-- **The regulation PDFs are in the wrong folder for the code.** They were fetched into `regulations/pdf/<reg>/<base|latest>/` (56 regulations), but `regcomp.corpus.DATA` is `regulations/data/`. Today `corpus.pdf_path()` returns `None` and `RegGraph` raises `FileNotFoundError("the base PDF of UN R48 is not in regulations/data; run tools/fetch_regulations.py --out regulations/data")`. Fix once and tell everyone: either `python tools/fetch_regulations.py --out regulations/data` (the download links expire after the hackathon, so do it while they work) or move the folder. `regulations/data/` is git-ignored.
-- `runs/` is git-ignored and holds the replay cache (`runs/_llm_cache`), the regulation cards (`runs/_cards/cards-<parser hash>.json`) and every run. **The first run parses all 56 PDFs to build the cards** (`Catalog().load()`), so warm it at startup, not on the first request.
-- PyMuPDF is not thread-safe. The pipeline already parses regulations in the calling thread and walks them in worker threads; two pipelines running at once in one process would break that.
-
-Run it from the repository root so `src/` is importable:
+## 3. Run it
 
 ```
-pip install -r src/backend/requirements.txt
+pip install -r src/backend/requirements.txt        # into src/.venv or any Python 3.12+
+# put your Anthropic key into the .env file in the repository root:  AI_AGENT_KEY=sk-ant-...
 uvicorn backend.main:app --app-dir src --reload --reload-dir src/backend --reload-dir src/ai_agent --reload-dir src/regcomp
 ```
 
-Serves on http://localhost:8000. Restrict `--reload` to those folders: by default it watches the whole working directory, and a job writing into `runs/` (or a frontend build writing into `src/frontend/dist`) would restart the server in the middle of a run. A reload still kills a running job, so use it only while developing.
+Serves on http://localhost:8000 (docs at `/docs`). It also starts from this folder: `uvicorn main:app` or `fastapi dev main.py`. Restrict `--reload` to those folders: by default it watches the whole working directory, and a job writing into `runs/` would restart the server in the middle of a run; a reload kills a running job, so use it only while developing. The frontend dev server proxies `/api` to port 8000 (`src/frontend/vite.config.ts`), so there is no CORS setup; with `SERVE_FRONTEND=true` the backend also serves `src/frontend/dist` at `/`, so one process is the whole demo.
 
-The frontend dev server proxies `/api` to port 8000 (`src/frontend/vite.config.ts`), so no CORS setup is needed.
+**The key.** `.env` in the repository root is git-ignored and read by `ai_agent.config` (the pipeline) and by the backend. Variables: `AI_AGENT_KEY` (the Anthropic key), `AI_AGENT_MODEL` (default `claude-sonnet-5-5`), `WEB_MAX_COST_USD` (the most one search may spend, default 8; the pipeline's own default is 25). A variable already set in the real environment wins over the file. Without a key a new search is refused with `503` and a plain message, `GET /api/status` says `apiKey: false`, and the example still opens. An empty `AI_AGENT_KEY=` line counts as set to nothing, so `backend.settings.api_key_present()` drops an empty value before it reads the file again: **a key pasted into `.env` while the backend runs is found by the next request, no restart.** The key is never returned, logged or stored: error text is scrubbed (`settings.redact`) before it reaches a response or `job.log`, and a test checks it.
 
-## 5. Design
+**The regulation PDFs.** `regcomp.corpus` looks in `regulations/data/`, but `tools/fetch_regulations.py` writes to `regulations/pdf/` unless told otherwise, so a fresh checkout has them there. The backend takes `regulations/data` when it exists, else `regulations/pdf` (`REGULATIONS_DIR` overrides both) and points `corpus.DATA` at it when it starts, so nothing has to be moved and the pipeline is not edited. Only the 56 base versions are on this machine; the 36 `latest` versions have not been fetched.
 
-### 5.1 Asynchronous jobs
+**First start.** There is no index yet, so the backend builds it by itself in the background: about **110 seconds** for the 56 regulations (measured). A search started meanwhile waits in `queued` until the cards exist. The next starts find the index and do nothing.
 
-`POST /api/analyses` stores the upload, creates a job and returns `202` with its id at once. The frontend polls `GET /api/analyses/{id}` every 1.5 seconds and shows the stages. One request that stays open for seven minutes would hit proxy and browser timeouts and lose the result on a reload.
+## 4. What exists upstream (read from the code)
 
-### 5.2 One worker
+`src/regcomp/` is the **parser of the regulation PDFs** (PDF to nodes: paragraphs, tables and annex headings with label, physical page range, breadcrumb `path`, text, table grids). `src/ai_agent/` is the algorithm that maps a product's documents to regulations; it uses `regcomp`. `tools/validate.py` is the platform's format check (the pipeline already runs it). Details: `src/README.md`, `src/ai_agent/README.md`.
 
-A `ThreadPoolExecutor(max_workers=1)` runs the jobs one after another; later jobs report `queued`. This keeps PyMuPDF single-threaded across jobs and caps spending. `Settings.workers` (default 5) still parallelises inside one run.
+| Pipeline stage | Artifact in the run folder | Used for |
+|---|---|---|
+| vision (only with an image) | `vision.json` (components with a normalised `region` box) | dots on the drawing |
+| profile | `profile.json` | product name, summary, vehicle category, names of parts |
+| regulations | `regulations.json` (`selected[]`: `level`, `confidence`, `covers`, `reason`; `redirects`) | the regulation list and why each applies |
+| sections | `sections.json`, `walk-<reg>.json`, `citation_hop.json` | progress detail |
+| obligations, emit | `candidates.json`, `submission.json`, `trace.json` (`applies`, `kind`, `quote`, `why` per requirement) | the checklist |
+| components | `component_map.json` | the component filter |
 
-### 5.3 Persistence on disk
+The backend calls `ai_agent.pipeline.run_case(case_dir, settings, run_dir, log=..., catalog=..., component_map=True)`: with its own run folder, the shared catalog, a log callback, and the component map always on (with no drawing it groups the parts of the specification, which gives the frontend its component chips). The pipeline's own rules hold: the model never writes a location, and it never opens `expected.json`. Measured on the dev case (text and image): 317 requirements over UN R10, R148, R150, R48; regulation precision and recall 1.00 and 1.00, page level 0.73 and 0.91; about **7.5 minutes and $4** per run. Identical model requests are replayed for free from `runs/_llm_cache`.
+
+## 5. The regulation index
+
+**Is the parsed knowledge persistent? Now it is; before this backend it was only partly.** The pipeline cached the regulation *cards* (`runs/_cards/cards-<parser hash>.json`) but parsed the PDFs of the chosen regulations again on every run (`RegGraph(reg)` calls the parser each time). `backend/knowledge.py` keeps both:
+
+```
+runs/_index/
+  manifest.json                    parser, parser hash, build time and duration, per regulation: pages, nodes, PDF size and mtime; problems
+  cards/cards-<hash>.json          the cards (title, scope, contents, supersession), as ai_agent.catalog writes them
+  parsed/<parser>-<hash>/<reg>__base__grids__<size>-<mtime>.pkl     one pickled ParsedDocument per PDF
+```
+
+- **Keyed by the parser.** The hash of the parser's source file is in the folder name, so changing `regcomp/parse.py` makes the stored documents unreachable by itself; a PDF that changes on disk gets a new file name (its size and time are in it). Old parser folders are deleted after a build.
+- **What it saves.** A document loads in about 0.01 s (up to 0.5 MB each, 16 MB for all 56). `RegGraph("UN R48")` took 0.03 s from the cache; parsing the PDF takes about 2 s. The whole corpus parses in about 84 s (largest: UN R49, 363 pages, 21 s). A run selects four to eight regulations, so a run no longer waits 10 to 60 s for the parser.
+- **How the pipeline uses it without being edited.** `KnowledgeIndex.install()` replaces `ai_agent.store._parser` (the function `RegGraph` asks for its parser) with one that reads the cache first, and sets `regcomp.corpus.DATA`. Every call returns a fresh object read from the file, so no run can change what the next sees. A file that cannot be read is a cache miss, never an error. Pickles are only ever written by this process into a local folder.
+- **Thread safety.** PyMuPDF is not thread-safe: every real parse, by the index or by the pipeline through the cache, holds `PARSE_LOCK` (two threads asking for the same document parse it once).
+- **Rebuilding is explicit.** `POST /api/index/rebuild` (the frontend's "Rebuild index" button on the Find page) parses everything again (`force`), builds the new cards and documents next to the old ones and replaces them at the end; searches keep using the old index meanwhile, and a failed rebuild leaves the old one in place. Only one build runs at a time (`409` otherwise). Nothing else ever re-parses.
+- **Staleness is reported, not acted on.** `GET /api/status` compares the manifest with the disk: `stale` when the parser changed, a PDF changed or disappeared, or a regulation has no entry yet, each with a sentence in `staleReasons`. A stale index still works (a missing document is parsed on demand and stored). Only a missing index is built automatically (first start).
+- **States:** `missing` (nothing built; a first build starts by itself), `building` (with `progress`: phase `cards` or `parsing`, done, total, current regulation), `ready`, `stale`, `failed` (with `error`).
+- Not persisted on purpose: the model's answers (the pipeline's own `runs/_llm_cache` does that), the latest versions (section 9).
+
+## 6. Jobs
+
+`POST /api/analyses` stores the upload, creates a job and answers `202` at once; the work takes minutes, so the frontend polls `GET /api/analyses/{id}` every 1.5 s.
 
 ```
 runs/web/<id>/
-  job.json        { id, status, createdAt, finishedAt?, files: [{name, role, bytes}], hasDrawing, error? }   (written atomically)
-  input/          spec.md, drawing.<ext>        the case folder handed to the pipeline
-  run/            the run folder (run_case(..., run_dir=...))
-  result.json     the adapter's output, cached after the first build
-  job.log         the pipeline's log lines
+  job.json      state, written atomically; reloaded at startup
+  input/        spec.md, drawing.<ext>: the case folder handed to the pipeline
+  run/          the pipeline's run folder
+  result.json   the adapter's output, kept once the job is done
+  job.log       the pipeline's log lines and, on a failure, the traceback (never sent to the user)
 ```
 
-State lives in memory while a job runs and is reloaded from `job.json` otherwise, so a restart keeps finished results. A job found `queued` or `running` at startup is marked `failed` ("interrupted by a restart"). No cleanup policy for the demo; document how to delete `runs/web/`.
+- **One worker** runs the jobs in turn (`ThreadPoolExecutor(1)`): PyMuPDF is single-threaded and a run costs money. A job that waits, also for the first index build, is `queued`.
+- **Uploads** (`uploads.py`): the pipeline wants one text spec and one image, so text files (UTF-8, no NUL bytes) become `spec.md` (several are joined in upload order under a `## <file name>` heading, at most 200,000 characters) and the first image becomes `drawing.<ext>`. The kind of a file is decided by its content (PNG, JPEG or WebP magic bytes, then a strict UTF-8 decode), never by its name; Pillow checks the image is not damaged. Refused with a clear message: a second image (400), PDF or Word files (415), binary or non-UTF-8 text (415), empty (400), over 10 MB (413), more than 20 files (400). File names are only used, cleaned, as headings in `spec.md`, never as paths.
+- **Progress needs no change to the pipeline:** a stage is done when its artifact exists in `run/` (vision.json, profile.json, regulations.json, sections.json, submission.json, component_map.json); the first stage not done is `running`; `detail` is read from the artifact ("7 components found on the drawing", the chosen codes, "317 requirements").
+- **Failures** end the job in `failed` with a plain `error` and the stage that was running marked `failed`: spending limit reached (`BudgetExceeded`), the model declined (`Refused`), key missing or rejected, rate limit, no connection, missing PDFs, anything else a generic line. The traceback is in `job.log`. A job that was queued or running when the process died is failed at the next start ("restarted while this search was running").
+- **Cost:** each job gets `Settings.from_env(max_cost_usd=WEB_MAX_COST_USD)`; the pipeline stops before a call that would start above it.
+- The `example` analysis (`/api/analyses/example`) is always finished and needs no key: the demo's safety net. It is built by the same adapter from `outputs/dev-rear-lamp-image/` (or from `src/backend/fixtures/example/` if a full recorded run is kept there), with hand-written regulation reasons and hand-measured dot positions (a live result puts a dot at the centre of the model's box, up to about 0.1 of the image off the leader line).
 
-### 5.4 Uploads become a case folder
-
-`find_inputs` wants one text spec (`spec.md`, `technical_spec.md`, or the only other `.md`) and one image (the only `png/jpg/jpeg/webp`; with several it takes the first by name and ignores the rest). The backend therefore normalises:
-
-- **Text files** (`.md`, `.txt`, UTF-8, no NUL bytes): one file becomes `spec.md`; several are joined in upload order, each under a `## <sanitised file name>` heading. Total cap 200,000 characters (413 beyond).
-- **Image** (PNG, JPEG or WebP, checked by magic bytes, then opened with Pillow if installed): saved as `drawing.<ext>`. A second image is a `400`.
-- Limits (same constants as `src/frontend/src/lib/upload.ts`): 10 MB per file, at least one file, only the types above (`415` otherwise). User file names are never used as paths.
-- PDF and Word files are not read by the pipeline. Possible later step: extract text with PyMuPDF (already a dependency) into the specification; scanned PDFs would need OCR.
-
-### 5.5 Progress comes from the artifacts
-
-No change to `ai_agent` is needed: a stage is done when its artifact exists in `run/`. The first stage that is not done is `running`.
-
-| Stage id | Done when | `detail` (shown by the frontend once done) |
-|---|---|---|
-| `vision` (skipped without an image) | `vision.json` | "N callouts read" (`len(components)`) |
-| `profile` | `profile.json` | "N parts, M functions" |
-| `regulations` | `regulations.json` | the chosen codes, comma separated |
-| `sections` | `sections.json` (written after the walks and the citation hop) | "N provisions selected" (sum of `provisions`) |
-| `obligations` | `submission.json` (written by emit) | "N requirements" |
-| `components` (skipped when disabled) | `component_map.json` | "N components" |
-
-Check the artifacts whenever the pipeline's `log` callback fires (it is called from several threads: guard shared state) and when `GET` is called. A later `progress` callback in `run_case` would make this exact (section 9).
-
-### 5.6 The result adapter
-
-A pure function `build_result(run_dir, job) -> AnalysisResult` (no network, no model, testable offline). Mapping, with the sources in the run folder:
-
-| Field of `AnalysisResult` | Source |
-|---|---|
-| `product.name`, `summary`, `vehicleCategories` | `profile.json`: `product`, `summary`, `vehicle_categories` (drop `unspecified`) |
-| `regulations[]` | one per regulation with at least one emitted requirement, in the order of `regulations.json` `selected[]`, then the regulations added by the citation hop |
-| `regulations[].code`, `level`, `confidence`, `reason` | the `selected` entry. For a hop-added regulation: `reason` from `citation_hop.json` `vetted.add[]`, `confidence: "medium"` (the pipeline treats it so), `level` unknown (fallback `"device"`; see section 9) |
-| `regulations[].title`, `version` | `regcomp.corpus.entry_for(code)["title"]` and `corpus.version_label(entry, "base")` |
-| `regulations[].covers` | `selected[].covers` holds profile keys (`F1`, `P2`, `T1`): resolve them to names with `profile.json` `functions`, `parts`, `technologies` |
-| `regulations[].requirements[]` | `submission.json` `requirements` grouped by `source.regulation`, in file order (document order) |
-| requirement `applies`, `kind` | `trace.json` entry with the same `id` (`applies` is `certain`, `likely` or `possible`) |
-| requirement `sectionTitle` | not available yet (section 9): from the node `path` |
-| `components[]` | `component_map.json` `components`: `id`, `name`, `requirement_ids` |
-| `components[].marker` | the centre of the `region` box of the component's `C*` key in `vision.json` (a component's `keys` list says which); none for spec-only components |
-| `wholeProductRequirementIds` | `component_map.json` `whole_product_requirement_ids` |
-| `drawing` | `{ url: "/api/analyses/<id>/drawing", alt }` when an image was uploaded |
-
-Never put a quote, a stack trace or an unvalidated string from a model into a field the UI renders as code. `trace.json` also has the verbatim `quote` of each requirement: not exposed yet, but it is what a future "show the source sentence" needs.
-
-### 5.7 The `example` analysis
-
-`GET /api/analyses/example` must always answer with a finished result and work without an API key: the demo's safety net when the network or the key fails, and what the frontend's "View an example result" opens. Until a real run exists, build it from the recorded run in `outputs/dev-rear-lamp-image/` (`submission.json`, `component_map.json`, `profile.md`, `vision.json`) with the hand-written regulation reasons the frontend mock uses (`src/frontend/src/lib/analysis/mock-result.ts`), and serve `cases/dev-rear-lamp/exploded_view.png` as its drawing. After the first real run of the dev case, copy that run's `profile.json`, `regulations.json`, `trace.json`, `submission.json`, `vision.json`, `component_map.json` to `src/backend/fixtures/example/` (about 0.5 MB) and serve `example` from them through the same adapter.
-
-### 5.8 Cost and errors
-
-- Per job: `Settings.from_env(max_cost_usd=...)` with a lower default than the pipeline's 25 USD (suggest 8, overridable by an env var such as `WEB_MAX_COST_USD`). The pipeline stops before a call that would start above the cap (`BudgetExceeded`).
-- Without `AI_AGENT_KEY` (`MissingKey`): `POST` answers `503` with a plain message; `example` still works. `GET /api/health` reports it.
-- Job failures set `status: "failed"` and a short human `error`: `BudgetExceeded` ("stopped at $X of the $Y budget"), `Refused` (the model declined), missing PDF (`FileNotFoundError`: tell the operator to fetch the regulations), anything else a generic message with the job id. The full traceback goes to `job.log` only. Partial results are not returned.
-- Keep `result.problems` (validation) and `result.failures` (stage failures, e.g. a regulation walk that did not finish) in `job.json` for the operator; the UI does not show them yet.
-
-## 6. API
-
-`/api` prefix. JSON field names are camelCase exactly as in `src/frontend/src/lib/analysis/types.ts`.
+## 7. API
 
 | Method and path | Request | Response |
 |---|---|---|
-| `GET /api/health` | | `200 { status: "ok", catalog: "loading"\|"ready"\|"failed", apiKey: boolean, pdfs: boolean }` |
-| `POST /api/analyses` | `multipart/form-data`, field `files` repeated | `202 { id }` and `Location`. `400` no file, a second image, unreadable text; `413` too large; `415` unsupported type; `503` no API key |
-| `GET /api/analyses/{id}` | | `200 Analysis`; `404 { detail }` for an unknown id (the frontend shows "This search no longer exists") |
-| `GET /api/analyses/{id}/drawing` | | the uploaded image with its content type; `404` if none |
-| `GET /api/analyses/example` | | a finished `Analysis` (section 5.7) |
+| `GET /api/status` | | `{ apiKey, index: IndexStatus }` |
+| `POST /api/index/rebuild` | | `202 IndexStatus`; `409` when a build is running |
+| `POST /api/analyses` | `multipart/form-data`, field `files` repeated | `202 { id }` and a `Location` header; `400`, `413`, `415` (section 6); `503` without a key or without PDFs |
+| `GET /api/analyses/{id}` | | `Analysis`: `status` (`queued`, `running`, `done`, `failed`), `stages`, `createdAt`, `error`, `result` when done; `404` for an unknown id (also for malformed ones: ids are 32 hex digits, or `example`) |
+| `GET /api/analyses/{id}/drawing` | | the uploaded image; `404` if none |
 
-FastAPI errors use `{ "detail": "<string>" }` and the frontend shows `detail` when it is a string.
+Errors are `{ "detail": "<sentence>" }`. Optional fields are left out of the JSON, not sent as `null`. The models in `models.py` validate every response, so a field the frontend does not expect fails in a test rather than in the browser.
 
-A running job:
+## 8. The result adapter (`adapter.py`)
 
-```json
-{ "id": "5b1c…", "status": "running", "createdAt": "2026-10-25T10:12:03Z",
-  "stages": [
-    { "id": "vision", "status": "done", "detail": "7 callouts read" },
-    { "id": "profile", "status": "running" },
-    { "id": "regulations", "status": "pending" }, { "id": "sections", "status": "pending" },
-    { "id": "obligations", "status": "pending" }, { "id": "components", "status": "pending" } ] }
-```
+A pure function of the run folder: no model, no network.
 
-A finished job adds `"status": "done"`, all stages `done` or `skipped`, and `result`:
+| Field | Source |
+|---|---|
+| `product` | `profile.json`: `product`, `summary`, `vehicle_categories` (without `unspecified`) |
+| `regulations[]` | regulations that have at least one emitted requirement, in the order of `regulations.json` `selected[]`, then those added by the citation hop |
+| `code`, `level`, `confidence`, `reason` | the `selected` entry. A regulation added by the citation hop has no level (the field is left out) and gets `medium`, which is what the pipeline treats it as |
+| `title`, `version` | `regcomp.corpus` (`regulations/index.json`): the title and the **base** version label |
+| `covers` | `selected[].covers` holds profile keys (`F1`, `P2`, `T1`), resolved to names with `profile.json` |
+| `requirements[]` | `submission.json` grouped by regulation, in file order (document order) |
+| `applies`, `kind` | `trace.json` entry with the same id; `unlikely` is never shown |
+| `sectionTitle` | the breadcrumb of the node (`6 Individual specifications › 6.10 Rear position lamp › 6.10.4 Position › 6.10.4.2`) from the parse cache, cut at the segment that has the section's number: "Rear position lamp". Same grouping rule as the frontend (`6.10.4.2` is section `6.10`, `Annex 8 2.1` is `Annex 8`). None when the section has no heading of its own |
+| `components[]` | `component_map.json`: `id`, `name`, `requirement_ids` (only ids that exist), `marker` = centre of the model's box for the component's `C*` key in `vision.json` |
+| `wholeProductRequirementIds` | `component_map.json` |
+| `drawing` | `/api/analyses/<id>/drawing` when an image was uploaded |
 
-```json
-{ "product": { "name": "Rear lamp", "summary": "Combined rear lamp module …", "vehicleCategories": ["M1"] },
-  "regulations": [ { "code": "UN R148", "title": "Light-Signalling Devices (LSD)", "version": "1.6.0", "level": "device",
-      "confidence": "high", "reason": "…", "covers": ["Rear position lamp", "Outer lens"],
-      "requirements": [ { "id": "R-001", "text": "Every device belonging to an approved type shall …",
-          "source": { "regulation": "UN R148", "version": "1.6.0", "page": 6, "paragraph": "3.3.1.1" },
-          "applies": "certain", "kind": "marking" } ] } ],
-  "components": [ { "id": "K4", "name": "Outer lens", "marker": { "x": 0.08, "y": 0.25 }, "requirementIds": ["R-012"] } ],
-  "wholeProductRequirementIds": ["R-001"],
-  "drawing": { "url": "/api/analyses/5b1c…/drawing", "alt": "Exploded view" } }
-```
+A failing title lookup (PDF missing) loses the titles, not the result.
 
-Later: `GET /api/regulations/{reg}/pages/{n}.png`, the page of the base PDF rendered with PyMuPDF (validate `reg` against `regulations/index.json` and `n` against the page count, cache under `runs/_pages/`, hold the PyMuPDF lock). The frontend would show the cited page next to a requirement, and the `quote` from `trace.json` could be highlighted with `page.search_for`.
+## 9. Versioning and the sub-goal: what the parser supports (for the team)
 
-## 7. Code layout (suggested)
+The sub-goal of the challenge: given requirements derived from one version of a regulation and a later version, say which requirements change and why. **Nothing in the parser was changed**; this is what it already supports, checked on UN R175 (the sub-goal's dev regulation) with the base PDF from this checkout and the `latest` PDF fetched for the check.
 
-```
-src/backend/
-  __init__.py
-  main.py          FastAPI app, lifespan (warm Catalog in a thread, scan runs/web), mounts the router;
-                   optional: serve src/frontend/dist with StaticFiles so one process is the whole demo
-  settings.py      paths (ROOT, runs/web), limits, WEB_MAX_COST_USD, example locations
-  uploads.py       validate (magic bytes, size, types) and write the case folder
-  jobs.py          JobStore (job.json), Runner (single worker, calls run_case with a shared Catalog and a log callback), stage derivation
-  adapter.py       build_result(run_dir, job): pure, section 5.6
-  example.py       the recorded run (section 5.7)
-  routes.py        the endpoints
-  tests/           section 10
-  fixtures/example/  after the first real run
-```
+**What the parser gives.** `regcomp.parse.Node` has what a version comparison needs at node level:
+- `label` (the paragraph number in the gold's format), `page_start/page_end`, `path` (breadcrumb), `body`, and **`text_hash`**: a hash of what the node says that "ignores what a new version renumbers or re-sets": the number of a footnote, line breaks, whether a list is set inline. It is documented as built for telling a changed paragraph from a renumbered or re-flowed one.
+- Base and latest PDFs parse the same way. R175 base (`0.1.0`): 17 pages, 195 paragraphs and tables; latest (`1.0.0`): 19 pages, 229. Footers agree with the physical pages in both (0 mismatches).
+- Of the 195 base nodes, **180 keep both label and hash** in the latest version; 159 of those 180 moved to another page, so a diff by page would flag them and a diff by hash does not. 1 label exists only in base, 35 only in latest (the added provisions). This matches the 180 SAME / 13 MODIFIED / 2 REMOVED / 36 ADDED that `spec/finding/drift-agent.md` reports for the whole alignment.
 
-Pass one `Catalog().load()` instance to every `run_case(..., catalog=catalog)`: it is built once at startup. `run_case` returns a `RunResult` (`run_dir`, `submission`, `profile`, `regulations`, `candidates`, `problems`, `failures`, `ledger`).
+**Where the versioning logic lives.** Not in the parser: in `src/ai_agent/drift.py` and `run_drift.py` (alignment by label and hash, then a similarity assignment for moved or edited paragraphs, then a model judge only for changed paragraphs that carry a requirement, then reasons built from a word diff). Measured by its authors: on the dev case 7 of 7 changed requirements flagged, 5 false flags among 87 unchanged, about $0.1 per run; on ten generated cases flagged recall 0.80 and precision 0.88 (`spec/finding/drift-agent.md`; golds of the generated cases are noisy).
 
-## 8. Quality of the answer (what to expect, what to tune)
+**What is missing, to decide with the team** (none of it is a parser defect):
+1. **The parser has no notion of a version.** Version labels come from `regulations/index.json` (`base`, `latest`; 36 of the 56 regulations have a `latest`). The footer of every page carries `UN R175, version 0.1.0 | page 4 of 17`, but the parser's footer rule matches the version and keeps only the page number. A check that the footer's version equals the index's label would catch a wrong file; it is not done.
+2. **Only two versions per regulation exist** (base and latest): no history, so a requirement set derived from a middle version cannot be compared. The sub-goal as given needs only two.
+3. **This checkout has only the base PDFs** (56). The latest PDFs (36 regulations) are not on disk, and the regulation index parses base only, because the main goal cites the base version (a page of the latest version counts as a different page). To serve the sub-goal from the same index, `KnowledgeIndex` would also parse `latest` (the key already has the role in it) and the PDFs would have to be fetched (`python tools/fetch_regulations.py --role latest`).
+4. **The drift agent needs `requirements_old.json` as input** (the requirements derived from the old version, in the platform's format). This product does not keep requirement sets by version: a search result is not saved as such an input. A UI for the sub-goal would also have to ask for the old requirements or reuse a saved search.
+5. **No API or UI for it yet**, and `drift.py` needs `scipy` and `numpy` (`linear_sum_assignment`), which `requirements.txt` does not list because the main flow does not use them; the repo's own drift tests fail without them (6 of 47 in `eval/test_ai_agent.py --unit` on this machine, all `ModuleNotFoundError: scipy`).
+6. **Parser coverage:** the rules were written from five regulations and widened after a run over all 92 PDFs; `eval/health.py` flags 14 of them (`src/README.md`). Whether those include `latest` versions that matter for a hidden sub-goal case was not checked.
 
-The pipeline was tuned for the challenge's score, not for a checklist: on the dev case it returns 317 requirements where the experts list 190, so roughly 40% of the rows are extras (requirement-level strict precision 0.43, recall 0.72). Each requirement carries `applies`; the frontend shows `likely` and `possible` as badges. If the checklist feels padded, the options are: hide `possible` by default in the UI, or add an API parameter that applies a stricter emission policy (`emit.POLICIES`: `precision-v2` is the default, `precision-v1` also drops a regulation that has no `certain` requirement unless it was picked at high confidence). Regulation choice is the weak point on other products (the six generated cases in `testing/RESULTS.md`: regulation recall 0.25 to 1.00), so the regulation list with its `reason` matters more to users than the row count.
+## 10. How it was checked
 
-## 9. Small changes wanted in `ai_agent` (owned by the algorithm side; each backward compatible)
+- **59 tests** (`python -m pytest src/backend/tests`): uploads (content sniffing, every refusal), the adapter (invariants on the recorded dev run: 317 requirements, 4 regulations, 7 markers, ids unique and all references resolve), the index on two real PDFs (first build, restart, forced rebuild, staleness by PDF and by parser, corrupt cache, thread safety, only one build), the jobs and API with a fake pipeline (stages while running, queue, failure messages, key never in a response, restart recovery, 404s, rebuild, serving the frontend), and **one test that runs the real `run_case` with a scripted model behind the API** over UN R150 (and UN R3, which it redirects to R150) and checks the adapter against the files the pipeline actually wrote, including that every citation's page lies in the page range of the node with that label.
+- **Real runs on this machine:** the first start built the index from the 56 PDFs by itself (108 s, no problems, 16 MB); a restart found it ready and parsed nothing; a forced rebuild through the endpoint worked, refused a second one with 409, and replaced the files; the frontend in real mode (`VITE_USE_MOCK=false`) read the status through the Vite proxy, showed the rebuild's progress and the example result with section titles from the parsed PDFs; one tiny call through `ai_agent.llm` confirmed the key and model work ($0.0005).
+- **Not run:** a full analysis with the real model and a real drawing. The first one will show how the live dot positions look and whether the real component map and section titles read well.
 
-1. **Section titles for the checklist.** Carry `graph.nodes[idx].path` (the breadcrumb) from `obligations.ground` into the candidate and from there into `trace.json`; the adapter takes the section segment (`6.10 Rear position lamps`) as `sectionTitle`. Without it the UI groups by paragraph number only.
-2. **Dot positions on the drawing.** `vision.py` returns a `region` box per component, and the box centre misses the leader-line end by up to about 0.1 of the image (for the dev drawing: housing and fasteners are off by 0.05 to 0.13). Add an `anchor` point (where the leader line meets the part) to `MAP_SCHEMA`; the adapter prefers it over the box centre.
-3. **Components for text-only runs.** `component_map` is only built when an image was read (`component_map=None`). Pass `component_map=True` always: with no drawing it groups the parts of the specification, which gives the UI its component chips.
-4. **A progress callback.** An optional `progress(stage, event, detail)` argument of `run_case` would replace the artifact polling of section 5.5 with exact events.
-5. **`level` for citation-hop regulations.** `regulations.vet_cited` could return the level, so every regulation in the response has a real one.
+## 11. Gotchas
 
-## 10. Testing (no model call, no cost)
+- `KnowledgeIndex.install()` changes two globals of the pipeline (`corpus.DATA`, `store._parser`); the entry points call it, tests restore them (`conftest.isolate`).
+- `GET /api/status` computes staleness from the disk each time (about 56 `stat` calls): cheap, but do not poll it faster than the frontend does (1.5 s while building, once otherwise).
+- A reload of the dev server kills a running job; the job is marked failed at the next start.
+- `uvicorn --reload` without `--reload-dir` watches `runs/` and restarts on every file a job writes.
+- The first status after a start may say `building` for a moment before the first progress arrives (`progress.total` is 0 until the PDFs are listed).
+- Do not call `Catalog().load()` or `parse_pdf` from another thread without `PARSE_LOCK`.
 
-- **Adapter:** run `build_result` on a recorded run folder and assert the invariants the frontend relies on: every id in `components[].requirementIds` and `wholeProductRequirementIds` exists among the requirements; every requirement sits in the regulation named by its `source.regulation`; versions equal the base labels in `regulations/index.json`; no regulation with zero requirements; `marker` values in 0 to 1. Until a full run folder exists use `outputs/dev-rear-lamp-image/`.
-- **Uploads:** wrong magic bytes, `.docx`, empty file, two images, oversize, non-UTF-8 text, several text files joined in order, path-like file names.
-- **Jobs and API (FastAPI `TestClient`):** replace `run_case` with a fake that writes the stage artifacts one by one and assert the `queued` to `running` to `done` transitions and the `detail` strings; failure paths (`BudgetExceeded`, missing key, missing PDF); restart recovery marks an unfinished job `failed`; `example` works with no key.
-- **Pipeline itself:** `python eval/test_ai_agent.py --unit` must still pass; the backend must not change `ai_agent` behaviour.
-- **Contract:** the frontend's mock result (`src/frontend/src/lib/analysis/mock-result.ts`) and the adapter's `example` output should have the same shape; compare their keys in a test or by eye once.
-- **One real run** (about $4, 7 minutes; free if the replay cache holds the requests): `curl -F files=@cases/dev-rear-lamp/spec.md -F files=@cases/dev-rear-lamp/exploded_view.png http://localhost:8000/api/analyses`, poll the id, expect four regulations (UN R10, R148, R150, R48) and about 317 requirements, then open it in the frontend with `VITE_USE_MOCK=false`.
+## 12. Next steps
 
-## 11. Open questions
-
-- Show all requirements or hide `possible` ones by default? Needs a look at real results with the team (section 8).
-- More inputs: several drawings (the pipeline uses one), PDF datasheets (text extraction), spreadsheets. Each needs a change in `inputs.py`/`vision.py` or a conversion step here, and in the frontend's `lib/upload.ts`.
-- Show when a newer version of a regulation exists? `regulations/index.json` has the `latest` label for most; a `latestVersion` field would be cheap. Citations must stay on the base version (that is what the challenge scores).
-- Cancel a running job? The pipeline has no cancellation; skipping it is fine for the demo.
-- Serving: localhost only today. If the demo ever runs elsewhere, add auth in front, because every upload spends money.
-
-## 12. Next steps (in order, each with a check)
-
-1. **Environment.** Fix the PDF location (section 4), install the dependencies, create `.env` with `AI_AGENT_KEY`. Check: `python eval/test_ai_agent.py` passes with the corpus tests, and `python -c "import sys; sys.path.insert(0,'src'); from regcomp import corpus; print(corpus.pdf_path(corpus.entry_for('UN R48'),'base'))"` prints a path.
-2. **One real run of the dev case** with `python src/ai_agent/run.py cases/dev-rear-lamp --max-cost 6` (text and image). Check: `runs/dev-rear-lamp/<id>/` holds all the files of section 2. Copy them to `src/backend/fixtures/example/`.
-3. **Skeleton.** Package, `settings.py`, `GET /api/health`, lifespan warm-up of the catalog. Check: the health endpoint reports `catalog: "ready"` after a while.
-4. **`uploads.py`** with its tests.
-5. **`adapter.py` and `example.py`** with the invariant tests. Check: `GET /api/analyses/example` returns what the frontend mock returns, structurally.
-6. **`jobs.py` and the routes** with the fake-pipeline tests. Check: the frontend with `VITE_USE_MOCK=false` runs the example and shows a fake job's progress.
-7. **Real end-to-end** (section 10, last bullet). Fix whatever the mock hid.
-8. **The `ai_agent` changes** of section 9 (1 and 2 first: they change what users see).
-9. **Page images** (`GET /api/regulations/{reg}/pages/{n}.png`) and the frontend dialog.
-10. **Run instructions in the root README**, and optionally serve `src/frontend/dist` from FastAPI so one command starts the demo.
+1. **One real run** of the dev case through the UI (about $4, 7 minutes): check live dots, section titles, progress details, and keep the run's files in `src/backend/fixtures/example/` so the example shows a real live result.
+2. Add the `anchor` point of a component to `vision.py`'s schema (where the leader line meets the part); the adapter would prefer it to the box centre. Small change in `ai_agent`, backward compatible.
+3. Page images: `GET /api/regulations/{reg}/pages/{n}.png` rendered with PyMuPDF under `PARSE_LOCK`, cached under `runs/_pages/`, and a dialog in the frontend; `trace.json` has the verbatim `quote` to highlight with `page.search_for`.
+4. Decide with the team what to do about the sub-goal (section 9) and whether the index should also hold the latest versions.
+5. More inputs: PDF text extraction into the specification (PyMuPDF is already a dependency), several drawings (the pipeline uses one).
+6. Decide how to treat `possible` requirements (hide by default in the UI, or a stricter emission policy through a request parameter): the dev case returns 317 against 190 expected.
+7. Cancel a running job (the pipeline has no cancellation; skipping it is fine for the demo).
+8. If the demo ever runs anywhere but localhost, put authentication in front: every upload spends money.
