@@ -1,10 +1,11 @@
 import { cn } from '@/lib/utils'
 import type { Route } from '@/lib/use-route'
 
-const links: { route: Route; label: string }[] = [
-  { route: 'home', label: 'Home' },
-  { route: 'requirements', label: 'All Requirements' },
-  { route: 'assess', label: 'Assess Product' },
+// `short` is shown below the sm breakpoint so the island fits a phone.
+const links: { route: Route; label: string; short: string }[] = [
+  { route: 'home', label: 'Home', short: 'Home' },
+  { route: 'find', label: 'Find Regulations', short: 'Find' },
+  { route: 'reference', label: 'Reference Cases', short: 'Reference' },
 ]
 
 interface Props {
@@ -32,7 +33,7 @@ export function AppHeader({ route, onNavigate }: Props) {
           regal<span className="text-brand">.ai</span>
         </a>
         <ul className="flex items-center gap-1">
-          {links.map(({ route: r, label }) => (
+          {links.map(({ route: r, label, short }) => (
             <li key={r}>
               <a
                 href={`#/${r}`}
@@ -48,7 +49,8 @@ export function AppHeader({ route, onNavigate }: Props) {
                     : 'text-foreground/65 hover:bg-foreground/8 hover:text-foreground',
                 )}
               >
-                {label}
+                <span className="sm:hidden">{short}</span>
+                <span className="hidden sm:inline">{label}</span>
               </a>
             </li>
           ))}
