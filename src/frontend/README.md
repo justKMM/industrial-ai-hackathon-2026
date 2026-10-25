@@ -13,14 +13,15 @@ npm install
 npm run dev       # http://localhost:5173
 ```
 
+The app needs the backend to run a search: start it first, as described in [Using the backend](#using-the-backend). To try the interface without it, use `npm run dev:mock`.
+
 | Script | What it does |
 |---|---|
-| `npm run dev` | Start the dev server with hot reload |
+| `npm run dev` | Start the dev server with hot reload, connected to the backend |
+| `npm run dev:mock` | The same, with the backend faked in the browser: every search returns a recorded example. A **Mock** badge in the navigation shows it |
 | `npm run build` | Type-check and build for production into `dist/` |
 | `npm run preview` | Serve the production build locally |
 | `npm run lint` | Run ESLint |
-
-Out of the box the app runs against a **mock backend** that lives in the browser, so you can try everything without the API. See [Using the real backend](#using-the-real-backend).
 
 ## What is in the app
 
@@ -52,16 +53,23 @@ The Reference Cases page and the figures on the home page read straight from the
 
 Add a case folder and it appears without any code change.
 
-## Using the real backend
+## Using the backend
 
-The analysis is done by the FastAPI backend in `src/backend` (see its `spec.md`). To use it instead of the mock:
+The analysis is done by the FastAPI backend in `src/backend` (see [its README](../backend/README.md)). In short:
 
-```bash
-echo VITE_USE_MOCK=false > .env.local     # a file named .env.local in this folder (git ignores it)
-npm run dev                               # /api is proxied to http://localhost:8000
-```
+1. Put your Anthropic key in the `.env` file in the repository root (`AI_AGENT_KEY=sk-ant-...`).
+2. Start the backend from the repository root, on port 8000:
+   ```bash
+   pip install -r src/backend/requirements.txt
+   uvicorn backend.main:app --app-dir src
+   ```
+3. Start the app (`npm run dev`). The dev server forwards `/api` to `http://localhost:8000`. To use another address, set `BACKEND_URL` first (in PowerShell: `$env:BACKEND_URL="http://localhost:8001"`).
 
-The app only talks to the backend through `src/lib/analysis/`. The mock answers every upload with a recorded run of the rear lamp example. In the mock, a file whose name contains `fail` makes the analysis fail, to see the error state.
+Nothing has to be set to switch between the two: `npm run dev` always talks to the backend, and `npm run dev:mock` never does.
+
+The first time the backend starts it parses the regulation PDFs (about two minutes) and keeps the result on disk. The **Regulation index** card at the bottom of the Find page shows its state and has a **Rebuild index** button for when the PDFs or the parser change; a search never rebuilds it. The "View an example result" link needs no key.
+
+The app only talks to the backend through `src/lib/analysis/` and `src/lib/backend/`. In the mock, every upload gets a recorded run of the rear lamp example; a file whose name contains `fail` makes the analysis fail, and one containing `warn` gives a result with a warning, to see those states.
 
 ## Project structure
 
@@ -81,6 +89,8 @@ src/
     reference/               Reference cases browser
   lib/
     analysis/                Types, client (mock and HTTP) and helpers for the analysis
+    backend/                 Status of the backend: API key, regulation index (mock and HTTP)
+    config.ts, http.ts       The mock switch and the shared fetch helper
     cases.ts                 Reads the cases/ folder
     upload.ts                Which files are accepted
     use-route.ts             Hash-based routing
@@ -97,9 +107,12 @@ Each feature folder owns its components. Shared code lives in `components/` and 
 - **Edited shadcn files:** the `Select` menu opens below its trigger, the `Checkbox` has an indeterminate icon, and the `Sonner` toaster is fixed to the light theme. Re-adding those components overwrites the changes.
 - **Hotspots on the home banner:** the dots over the car photo and their example regulations are placeholder content in `src/features/home/car-hotspots.tsx`. They are positioned as percentages of the photo, so re-place them if the image changes.
 
-For design decisions, the data contract and the list of next steps, see [spec.md](spec.md).
+For design decisions, the data contract and the list of next steps, see [spec.md](spec.md); for the backend, [../backend/README.md](../backend/README.md).
 
 ## Troubleshooting
 
 - **Blank page and an error like "does not provide an export named 'default'":** the dev server got out of sync after many quick file changes. Stop it, run `npm run dev` again and hard-reload the browser.
-- **"This search no longer exists":** the mock keeps its analyses in your browser's local storage. Clearing site data removes them.
+- **"This search no longer exists":** the mock keeps its analyses in your browser's local storage, and the backend in `runs/web/`. Clearing site data or deleting that folder removes them.
+- **"Could not reach the backend" on the Find page:** the backend is not running on port 8000 (or at `BACKEND_URL`). Start it, or run `npm run dev:mock` to try the interface without it.
+- **Every search returns the rear lamp example and the navigation shows "Mock":** the app was started with `npm run dev:mock`. Use `npm run dev`.
+- **"The backend has no Anthropic API key":** add `AI_AGENT_KEY` to the `.env` file in the repository root; the backend finds it without a restart.

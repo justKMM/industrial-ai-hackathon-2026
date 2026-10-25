@@ -8,8 +8,8 @@ export default defineConfig({
   server: {
     // cases/ lives at the repo root, outside the Vite root, and is read directly
     fs: { allow: [path.resolve(__dirname, "../..")] },
-    // The FastAPI backend (src/backend), used when VITE_USE_MOCK=false
-    proxy: { "/api": "http://localhost:8000" },
+    // The FastAPI backend (src/backend); BACKEND_URL points the app at another address or port
+    proxy: { "/api": process.env.BACKEND_URL ?? "http://localhost:8000" },
   },
   resolve: {
     alias: {

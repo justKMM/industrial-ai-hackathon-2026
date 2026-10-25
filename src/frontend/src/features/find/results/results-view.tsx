@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { SearchX } from 'lucide-react'
+import { SearchX, TriangleAlert } from 'lucide-react'
 import { Accordion } from '@/components/ui/accordion'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import type { AnalysisResult } from '@/lib/analysis'
 import { checklistCsv, downloadCsv } from '@/lib/analysis/export-csv'
@@ -64,6 +65,20 @@ export function ResultsView({ analysisId, result, onNewSearch }: Props) {
         onReset={checklist.clear}
         onNewSearch={onNewSearch}
       />
+
+      {result.warnings && result.warnings.length > 0 && (
+        <Alert className="mt-6">
+          <TriangleAlert className="text-amber-600" />
+          <AlertTitle>This list may be incomplete</AlertTitle>
+          <AlertDescription>
+            <ul className="list-disc pl-4">
+              {result.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className={cn('mt-8 grid gap-6', showComponents && 'xl:grid-cols-[minmax(0,1fr)_30rem]')}>
         {showComponents && (

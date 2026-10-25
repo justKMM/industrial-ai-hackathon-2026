@@ -48,7 +48,8 @@ export interface RegulationResult {
   title: string
   /** The base version label every citation of this regulation refers to. */
   version: string
-  level: RegulationLevel
+  /** Absent for a regulation that was only cited by another one: the pipeline gives no level for it. */
+  level?: RegulationLevel
   confidence: Confidence
   /** Why the regulation applies to this product, in one or two sentences. */
   reason: string
@@ -74,6 +75,8 @@ export interface AnalysisResult {
   wholeProductRequirementIds: string[]
   /** The uploaded drawing, when there was one. */
   drawing?: { url: string; alt: string }
+  /** What failed without losing the run (a regulation whose sections could not be searched, ...): the list may be incomplete. */
+  warnings?: string[]
 }
 
 export interface Analysis {

@@ -6,15 +6,18 @@ import { ApiError, EXAMPLE_ID, type Analysis, type AnalysisApi, type AnalysisSta
 // of the time since they were created, so there are no timers to clean up.
 //   * any upload gives the recorded run on the dev case (see mock-result.ts)
 //   * a file whose name contains "fail" makes the job fail at the regulation stage, to see the error state
+//   * a file whose name contains "warn" gives a result with warnings, to see the "may be incomplete" notice
 //   * the id "example" is always a finished job
 
 const STORAGE_KEY = 'regal.mock.analyses'
+const WARNINGS = ['UN R10: the search for its relevant sections failed, so requirements may be missing.']
 
 interface Job {
   id: string
   createdAt: number
   withDrawing: boolean
   failing: boolean
+  warning?: boolean
 }
 
 const STEPS: { id: StageId; ms: number; needsDrawing?: boolean; detail?: string }[] = [
@@ -67,6 +70,7 @@ export const mockApi: AnalysisApi = {
       createdAt: Date.now(),
       withDrawing: files.some(isImage),
       failing: files.some((f) => /fail/i.test(f.name)),
+      warning: files.some((f) => /warn/i.test(f.name)),
     }
     saveJob(job)
     return { id: job.id }
@@ -84,6 +88,6 @@ export const mockApi: AnalysisApi = {
     const base = { id, stages, createdAt: new Date(job.createdAt).toISOString() }
     if (failedAt) return { ...base, status: 'failed', error: 'The model could not choose regulations for this product (mock failure).' }
     if (!finished) return { ...base, status: stages.some((s) => s.status === 'running') ? 'running' : 'queued' }
-    return { ...base, status: 'done', result: await buildSampleResult(job.withDrawing) }
+    return { ...base, status: 'done', result: await buildSampleResult(job.withDrawing, job.warning ? WARNINGS : undefined) }
   },
 }

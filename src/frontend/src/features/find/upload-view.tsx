@@ -1,15 +1,21 @@
 import { useState } from 'react'
-import { ArrowRight, Loader2 } from 'lucide-react'
+import { ArrowRight, KeyRound, Loader2, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { analysisApi, EXAMPLE_ID } from '@/lib/analysis'
+import { USE_MOCK } from '@/lib/config'
 import { acceptFiles, isImage } from '@/lib/upload'
 import { FileDropzone } from './file-dropzone'
 import { FileList } from './file-list'
+import { RegulationIndexCard } from './regulation-index-card'
+import { useBackendStatus } from './use-backend-status'
 
 export function UploadView({ onStarted }: { onStarted: (id: string) => void }) {
   const [files, setFiles] = useState<File[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const { state: backend, refresh } = useBackendStatus()
+  const noKey = backend.status === 'ready' && !backend.value.apiKey
 
   function addFiles(added: File[]) {
     const { accepted, rejected } = acceptFiles(files, added)
@@ -38,6 +44,27 @@ export function UploadView({ onStarted }: { onStarted: (id: string) => void }) {
         </p>
       </header>
 
+      {USE_MOCK && (
+        <Alert>
+          <TriangleAlert />
+          <AlertTitle>Mock mode</AlertTitle>
+          <AlertDescription>
+            The app is not connected to the backend: every search returns a recorded example of a rear lamp, whatever you upload. Run npm
+            run dev to use the real backend.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {noKey && (
+        <Alert variant="destructive">
+          <KeyRound />
+          <AlertTitle>The backend has no Anthropic API key</AlertTitle>
+          <AlertDescription>
+            Add AI_AGENT_KEY to the .env file in the repository root. New searches are refused until then; the example result still opens.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <FileDropzone disabled={submitting} onFiles={addFiles} />
 
       {files.length > 0 && (
@@ -56,7 +83,7 @@ export function UploadView({ onStarted }: { onStarted: (id: string) => void }) {
       )}
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button size="lg" className="h-11 px-6 text-base" disabled={files.length === 0 || submitting} onClick={submit}>
+        <Button size="lg" className="h-11 px-6 text-base" disabled={files.length === 0 || submitting || noKey} onClick={submit}>
           {submitting && <Loader2 className="animate-spin" data-icon="inline-start" aria-hidden />}
           {submitting ? 'Starting…' : 'Find regulations'}
           {!submitting && <ArrowRight data-icon="inline-end" aria-hidden />}
@@ -65,6 +92,8 @@ export function UploadView({ onStarted }: { onStarted: (id: string) => void }) {
           View an example result
         </Button>
       </div>
+
+      <RegulationIndexCard state={backend} onRefresh={refresh} />
     </main>
   )
 }

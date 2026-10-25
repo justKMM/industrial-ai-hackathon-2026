@@ -24,7 +24,7 @@ interface Props {
 export function RegulationItem({ regulation, visible, filtering, checked, onToggle, onSetMany }: Props) {
   const ids = visible.map((r) => r.id)
   const done = ids.filter((id) => checked.has(id)).length
-  const level = LEVELS[regulation.level]
+  const level = regulation.level ? LEVELS[regulation.level] : undefined
   const total = regulation.requirements.length
 
   return (
@@ -46,9 +46,11 @@ export function RegulationItem({ regulation, visible, filtering, checked, onTogg
                 <span className="text-xs font-normal text-muted-foreground">version {regulation.version}</span>
               </span>
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-normal text-muted-foreground">
-                <Badge variant="outline" title={level.hint}>
-                  {level.label} level
-                </Badge>
+                {level && (
+                  <Badge variant="outline" title={level.hint}>
+                    {level.label} level
+                  </Badge>
+                )}
                 {regulation.confidence !== 'high' && <span className="capitalize">{regulation.confidence} confidence</span>}
                 <span className="tabular-nums">{filtering ? `${visible.length} of ${total}` : total} requirements</span>
                 <span className="tabular-nums">{done} checked</span>

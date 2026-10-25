@@ -63,7 +63,7 @@ export function AnalysisProgress({ analysis }: { analysis: Analysis }) {
                       <span className="sr-only"> ({current?.status ?? 'pending'})</span>
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      {skipped ? 'Skipped: no drawing was uploaded.' : (current?.status === 'done' && current.detail) || stage.description}
+                      {skipped ? (current.detail ?? 'Skipped: no drawing was uploaded.') : (current?.status === 'done' && current.detail) || stage.description}
                     </p>
                   </div>
                 </li>

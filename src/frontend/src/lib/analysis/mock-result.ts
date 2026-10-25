@@ -76,7 +76,7 @@ async function first<T>(loaders: Record<string, () => Promise<T>>): Promise<T> {
 }
 
 /** The recorded run, shaped like the answer of the backend. Without a drawing there are no components and no image. */
-export async function buildSampleResult(withDrawing: boolean): Promise<AnalysisResult> {
+export async function buildSampleResult(withDrawing: boolean, warnings?: string[]): Promise<AnalysisResult> {
   const [submission, componentMap, profile, index] = await Promise.all([
     first(submissions),
     first(componentMaps),
@@ -124,5 +124,6 @@ export async function buildSampleResult(withDrawing: boolean): Promise<AnalysisR
     components: linked,
     wholeProductRequirementIds: componentMap.whole_product_requirement_ids,
     drawing: withDrawing ? { url: Object.values(drawings)[0], alt: 'Exploded view of the rear lamp' } : undefined,
+    warnings,
   }
 }

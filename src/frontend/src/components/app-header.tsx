@@ -1,3 +1,4 @@
+import { USE_MOCK } from '@/lib/config'
 import { cn } from '@/lib/utils'
 import type { Route } from '@/lib/use-route'
 
@@ -32,6 +33,14 @@ export function AppHeader({ route, onNavigate }: Props) {
         >
           regal<span className="text-brand">.ai</span>
         </a>
+        {USE_MOCK && (
+          <span
+            title="Mock mode: the app is not connected to the backend, and every search returns a recorded example"
+            className="hidden rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 sm:inline"
+          >
+            Mock
+          </span>
+        )}
         <ul className="flex items-center gap-1">
           {links.map(({ route: r, label, short }) => (
             <li key={r}>
