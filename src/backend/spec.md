@@ -1,6 +1,6 @@
 # Backend spec and working notes
 
-Audience: engineers and AI assistants working on `src/backend`. This file records what the backend does, why, how it was checked, and what is still open. The frontend side of the contract is `src/frontend/spec.md`; the JSON types are in `src/frontend/src/lib/analysis/types.ts` and `src/lib/backend/types.ts`, and their Python twins in `src/backend/models.py`. Last updated 2026-10-25.
+Audience: engineers and AI assistants working on `src/backend`. This file records what the backend does, why, how it was checked, and what is still open. How to run, configure and troubleshoot it, for people, is in [README.md](README.md). The frontend side of the contract is `src/frontend/spec.md`; the JSON types are in `src/frontend/src/lib/analysis/types.ts` and `src/lib/backend/types.ts`, and their Python twins in `src/backend/models.py`. Last updated 2026-10-25.
 
 ## 1. Purpose
 
@@ -18,23 +18,16 @@ A thin HTTP layer around the pipeline in `src/ai_agent/`. It receives a product'
 | A full real analysis (real model, real drawing) | **not run** (about $4 and 7 minutes; nobody asked for it yet). Everything around the model has been run with a script in its place |
 | Sub-goal (changes between regulation versions) | not exposed; see section 9 |
 | Page images of the cited regulation pages | not built |
-| Tests | `python -m pytest src/backend/tests` (59 tests, about 20 s, no model call, no cost) |
+| Tests | `python -m pytest src/backend/tests` (60 tests, about 20 s, no model call, no cost) |
 
-## 3. Run it
+## 3. Running and configuring it
 
-```
-pip install -r src/backend/requirements.txt        # into src/.venv or any Python 3.12+
-# put your Anthropic key into the .env file in the repository root:  AI_AGENT_KEY=sk-ant-...
-uvicorn backend.main:app --app-dir src --reload --reload-dir src/backend --reload-dir src/ai_agent --reload-dir src/regcomp
-```
+The commands, the variables of `.env`, the PDF folder and the troubleshooting list are in [README.md](README.md). What matters for the design:
 
-Serves on http://localhost:8000 (docs at `/docs`). It also starts from this folder: `uvicorn main:app` or `fastapi dev main.py`. Restrict `--reload` to those folders: by default it watches the whole working directory, and a job writing into `runs/` would restart the server in the middle of a run; a reload kills a running job, so use it only while developing. The frontend dev server proxies `/api` to port 8000 (`src/frontend/vite.config.ts`), so there is no CORS setup; with `SERVE_FRONTEND=true` the backend also serves `src/frontend/dist` at `/`, so one process is the whole demo.
-
-**The key.** `.env` in the repository root is git-ignored and read by `ai_agent.config` (the pipeline) and by the backend. Variables: `AI_AGENT_KEY` (the Anthropic key), `AI_AGENT_MODEL` (default `claude-sonnet-5-5`), `WEB_MAX_COST_USD` (the most one search may spend, default 8; the pipeline's own default is 25). A variable already set in the real environment wins over the file. Without a key a new search is refused with `503` and a plain message, `GET /api/status` says `apiKey: false`, and the example still opens. An empty `AI_AGENT_KEY=` line counts as set to nothing, so `backend.settings.api_key_present()` drops an empty value before it reads the file again: **a key pasted into `.env` while the backend runs is found by the next request, no restart.** The key is never returned, logged or stored: error text is scrubbed (`settings.redact`) before it reaches a response or `job.log`, and a test checks it.
-
-**The regulation PDFs.** `regcomp.corpus` looks in `regulations/data/`, but `tools/fetch_regulations.py` writes to `regulations/pdf/` unless told otherwise, so a fresh checkout has them there. The backend takes `regulations/data` when it exists, else `regulations/pdf` (`REGULATIONS_DIR` overrides both) and points `corpus.DATA` at it when it starts, so nothing has to be moved and the pipeline is not edited. Only the 56 base versions are on this machine; the 36 `latest` versions have not been fetched.
-
-**First start.** There is no index yet, so the backend builds it by itself in the background: about **110 seconds** for the 56 regulations (measured). A search started meanwhile waits in `queued` until the cards exist. The next starts find the index and do nothing.
+- **The key.** `.env` in the repository root is read by `ai_agent.config` (the pipeline) and by the backend; a variable already set in the real environment wins. `Settings.from_env(max_cost_usd=WEB_MAX_COST_USD)` is what every job uses, so the pipeline's own `AI_AGENT_MAX_COST_USD` has no effect here. Without a key a new search is refused with `503`, `GET /api/status` says `apiKey: false`, and the example still opens. `load_env` never overrides a variable that is already set, and an empty `AI_AGENT_KEY=` line counts as set to nothing, so `backend.settings.api_key_present()` drops an empty value before it reads the file again: **a key pasted into `.env` while the backend runs is found by the next request, no restart.** The key is never returned, logged or stored: error text is scrubbed (`settings.redact`) before it reaches a response or `job.log`, and a test checks it.
+- **The regulation PDFs.** `regcomp.corpus` looks in `regulations/data/`, but `tools/fetch_regulations.py` writes to `regulations/pdf/` unless told otherwise, so a fresh checkout has them there. The backend takes `regulations/data` when it exists, else `regulations/pdf` (`REGULATIONS_DIR` overrides both) and points `corpus.DATA` at it when it starts, so nothing has to be moved and the pipeline is not edited. Only the 56 base versions are on the machine this was written on; the 36 `latest` versions have not been fetched.
+- **First start.** There is no index yet, so the backend builds it by itself in the background: about **110 seconds** for the 56 regulations (measured). A search started meanwhile waits in `queued` until the cards exist. Later starts find the index and do nothing.
+- **Entry points.** `uvicorn backend.main:app --app-dir src` from the repository root, or `uvicorn main:app` / `fastapi dev main.py` from `src/backend` (`main.py` puts `src/` on `sys.path` itself; all three were run). `--reload` must be limited with `--reload-dir`, or the files a job writes into `runs/` restart the server mid-run (section 11).
 
 ## 4. What exists upstream (read from the code)
 
@@ -120,6 +113,7 @@ A pure function of the run folder: no model, no network.
 | `components[]` | `component_map.json`: `id`, `name`, `requirement_ids` (only ids that exist), `marker` = centre of the model's box for the component's `C*` key in `vision.json` |
 | `wholeProductRequirementIds` | `component_map.json` |
 | `drawing` | `/api/analyses/<id>/drawing` when an image was uploaded |
+| `warnings` | one sentence per entry of `failures` in `run.json` (a failed section walk or extraction chunk, a failed component map) and per walk in `sections.json` with `finished: false`. The pipeline carries on after such a failure and returns what it has, which for a regulation may be less than there is, so the frontend says "This list may be incomplete". The error text stays on the server |
 
 A failing title lookup (PDF missing) loses the titles, not the result.
 
@@ -144,8 +138,8 @@ The sub-goal of the challenge: given requirements derived from one version of a 
 
 ## 10. How it was checked
 
-- **59 tests** (`python -m pytest src/backend/tests`): uploads (content sniffing, every refusal), the adapter (invariants on the recorded dev run: 317 requirements, 4 regulations, 7 markers, ids unique and all references resolve), the index on two real PDFs (first build, restart, forced rebuild, staleness by PDF and by parser, corrupt cache, thread safety, only one build), the jobs and API with a fake pipeline (stages while running, queue, failure messages, key never in a response, restart recovery, 404s, rebuild, serving the frontend), and **one test that runs the real `run_case` with a scripted model behind the API** over UN R150 (and UN R3, which it redirects to R150) and checks the adapter against the files the pipeline actually wrote, including that every citation's page lies in the page range of the node with that label.
-- **Real runs on this machine:** the first start built the index from the 56 PDFs by itself (108 s, no problems, 16 MB); a restart found it ready and parsed nothing; a forced rebuild through the endpoint worked, refused a second one with 409, and replaced the files; the frontend in real mode (`VITE_USE_MOCK=false`) read the status through the Vite proxy, showed the rebuild's progress and the example result with section titles from the parsed PDFs; one tiny call through `ai_agent.llm` confirmed the key and model work ($0.0005).
+- **60 tests** (`python -m pytest src/backend/tests`): uploads (content sniffing, every refusal), the adapter (invariants on the recorded dev run: 317 requirements, 4 regulations, 7 markers, ids unique and all references resolve), the index on two real PDFs (first build, restart, forced rebuild, staleness by PDF and by parser, corrupt cache, thread safety, only one build), the jobs and API with a fake pipeline (stages while running, queue, failure messages, key never in a response, restart recovery, 404s, rebuild, serving the frontend), and **one test that runs the real `run_case` with a scripted model behind the API** over UN R150 (and UN R3, which it redirects to R150) and checks the adapter against the files the pipeline actually wrote, including that every citation's page lies in the page range of the node with that label.
+- **Real runs on this machine:** the first start built the index from the 56 PDFs by itself (108 s, no problems, 16 MB); a restart found it ready and parsed nothing; a forced rebuild through the endpoint worked, refused a second one with 409, and replaced the files; the frontend (real mode is its default) read the status through the Vite proxy, showed the rebuild's progress and the example result with section titles from the parsed PDFs; a full upload in the browser ran against this backend with its pipeline replaced by a fake that writes the recorded dev run stage by stage (a 32-digit job id, progress details from the artifacts, 317 requirements, the drawing served by the backend, the result still there after a reload); one tiny call through `ai_agent.llm` confirmed the key and model work ($0.0005).
 - **Not run:** a full analysis with the real model and a real drawing. The first one will show how the live dot positions look and whether the real component map and section titles read well.
 
 ## 11. Gotchas
